@@ -158,7 +158,7 @@ jobs:
             "tagger": {
               "name": "Alice from Wonderland",
               "email": "noreply@localhost.localdomain",
-              "date": "${{steps.timestamp.outputs.timestamp}}"
+              "date": "$( date "+%FT%TZ" )"
             }'
 
 
