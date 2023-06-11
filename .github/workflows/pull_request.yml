@@ -1,0 +1,181 @@
+---
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+
+name: Validate Pull Request
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+
+  notify_started:
+    name: Send notification on start
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Send notification on start
+        uses: rest-gateway/notification-action@1.0.9
+        with:
+          message: |
+            <b>Workflow:</b> <code>${GITHUB_WORKFLOW}</code>
+            <b>Repository:</b> ${GITHUB_REPOSITORY} (${GITHUB_REF#refs/heads/})
+            <b>URL:</b> <code>https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}</code>
+          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
+          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
+          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
+          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
+
+
+  validate_new_version:
+    name: Validate new version
+    runs-on: ubuntu-latest
+    outputs:
+      planned_version: ${{ steps.validate_new_version.outputs.planned_version }}
+      planned_version_commit: ${{ steps.get_version_commit.outputs.version_commit }}
+      version_file_exists: ${{ steps.validate_new_version.outputs.version_file_exists }}
+      tag_hash: ${{ steps.validate_new_version.outputs.tag_hash }}
+      can_create: ${{ steps.validate_new_version.outputs.can_create }}
+      tag_exists: ${{ steps.validate_new_version.outputs.tag_exists }}
+      branch_name: ${{ steps.validate_new_version.outputs.branch_name }}
+
+    steps:
+
+      - name: Check out this repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+
+      - name: Workaround the version file format
+        id: prepare_version_file
+        shell: bash
+        run: >-
+          grep __version__ django_pyp8s/_version.py | cut -d "=" -f 2 | tr -d '"' > .version
+
+
+      - name: Use latest released action
+        id: validate_new_version
+        uses: reinvented-stuff/validate-version-action@1.2.0
+        with:
+          version_filename: ".version"
+          github_token: "${{ secrets.GITHUB_TOKEN }}"
+          fail_on_error: false
+
+
+      - name: Comment new version on the pull request
+        id: comment_pr
+        if: steps.validate_new_version.outputs.can_create == 'true'
+        run: |
+          URL="https://api.github.com/repos/${{github.repository}}/issues/${{ github.event.pull_request.number }}/comments"
+          echo "URL: ${URL}"
+
+          curl \
+          -s \
+          -X POST \
+          -H 'authorization: Bearer ${{secrets.GITHUB_TOKEN}}' \
+          -H "Accept: application/vnd.github.v3+json" \
+          --url "${URL}" \
+          -d "{\"body\":\"v${{steps.validate_new_version.outputs.planned_version}} can be released\"}"
+
+
+  build_and_test:
+    name: Build and Test
+
+    outputs:
+      job_status: ${{ job.status }}
+
+    runs-on: ubuntu-latest
+
+    env:
+      APP_NAME: "django_pyp8s"
+
+    steps:
+
+
+      - name: Check out this repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+
+      - name: Set up Python3
+        id: setup_python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+
+
+      - name: Prepare environment
+        id: prepare_build_env
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest setuptools wheel
+
+
+      - name: Run tests
+        id: run_tests
+        shell: bash
+        run: >-
+          python3 -m pytest
+
+
+      - name: Build python package
+        id: run_build
+        shell: bash
+        run: |
+          make clean build
+          cat .build_artifacts
+
+          echo "artifacts_list_filename=${PWD}/.build_artifacts" >> "${GITHUB_OUTPUT}"
+
+
+      - name: Compress workspace
+        id: compress_workspace
+        shell: bash
+        if: 1 == 2
+        run: >-
+          WORKPLACE_ARCHIVE_FILENAME="workspace_${{ github.run_id }}.tar.gz"
+
+          tar --exclude="${WORKPLACE_ARCHIVE_FILENAME}"
+          -zcf "${WORKPLACE_ARCHIVE_FILENAME}"
+          .
+
+          echo "workspace_archive_filename=${PWD}/${WORKPLACE_ARCHIVE_FILENAME}" >> "${GITHUB_OUTPUT}"
+
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3.1.0
+        id: upload_build_artifacts
+        if: always()
+        with:
+          name: "${{ env.APP_NAME }}_${{ github.run_id }}"
+          path: |
+            dist/*.whl
+            dist/*.egg
+
+          if-no-files-found: error
+          retention-days: 90
+
+
+      - name: Send notification on build completion
+        uses: rest-gateway/notification-action@1.0.9
+        if: always()
+        with:
+          message: |
+            <b>Workflow:</b>   ${GITHUB_WORKFLOW}
+            <b>Repository:</b> ${GITHUB_REPOSITORY}
+
+            <b>Run:</b> <code>https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}</code>
+
+          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
+          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
+          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
+          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
+
+
+...
