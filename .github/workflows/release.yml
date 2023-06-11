@@ -151,7 +151,7 @@ jobs:
           curl --request POST --url https://api.github.com/repos/${{ github.repository }}/git/tags \
           -H 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
           -H 'content-type: application/json' \
-          --data '{"tag": "${env.PLANNED_VERSION}",
+          --data '{"tag": "${{ env.PLANNED_VERSION }}",
             "message": "Pipeline build tag",
             "object": "${{ github.sha }}",
             "type": "commit",
